@@ -1,22 +1,26 @@
-import { UserDatabase } from "../database/UserDatabase"
-import { GetUsersInputDTO, GetUsersOutputDTO } from "../dtos/user/getUsers.dto"
-import { LoginInputDTO, LoginOutputDTO } from "../dtos/user/login.dto"
-import { SignupInputDTO, SignupOutputDTO } from "../dtos/user/signup.dto"
-import { BadRequestError } from "../errors/BadRequestError"
-import { NotFoundError } from "../errors/NotFoundError"
-import { USER_ROLES, User } from "../models/User"
+import { UserDatabase } from "../database/UserDatabase";
+import { GetUsersInputDTO, GetUsersOutputDTO } from "../dtos/user/getUsers.dto";
+import { LoginInputDTO, LoginOutputDTO } from "../dtos/user/login.dto";
+import { SignupInputDTO, SignupOutputDTO } from "../dtos/user/signup.dto";
+import { BadRequestError } from "../errors/BadRequestError";
+import { NotFoundError } from "../errors/NotFoundError";
+import { USER_ROLES, User } from "../models/User";
+import { IdGenerator } from "../services/IdGenerator";
+import { TokenManager, TokenPayload } from "../services/TokenManager";
 
 export class UserBusiness {
   constructor(
-    private userDatabase: UserDatabase
-  ) { }
+    private userDatabase: UserDatabase,
+    private idGenerator: IdGenerator,
+    private tokenManager: TokenManager
+  ) {}
 
   public getUsers = async (
     input: GetUsersInputDTO
   ): Promise<GetUsersOutputDTO> => {
-    const { q } = input
+    const { q } = input;
 
-    const usersDB = await this.userDatabase.findUsers(q)
+    const usersDB = await this.userDatabase.findUsers(q);
 
     const users = usersDB.map((userDB) => {
       const user = new User(
@@ -26,25 +30,25 @@ export class UserBusiness {
         userDB.password,
         userDB.role,
         userDB.created_at
-      )
+      );
 
-      return user.toBusinessModel()
-    })
+      return user.toBusinessModel();
+    });
 
-    const output: GetUsersOutputDTO = users
+    const output: GetUsersOutputDTO = users;
 
-    return output
-  }
+    return output;
+  };
 
-  public signup = async (
-    input: SignupInputDTO
-  ): Promise<SignupOutputDTO> => {
-    const { id, name, email, password } = input
+  public signup = async (input: SignupInputDTO): Promise<SignupOutputDTO> => {
+    const { name, email, password } = input;
 
-    const userDBExists = await this.userDatabase.findUserById(id)
+    const id = this.idGenerator.generate();
+
+    const userDBExists = await this.userDatabase.findUserById(id);
 
     if (userDBExists) {
-      throw new BadRequestError("'id' já existe")
+      throw new BadRequestError("'id' já existe");
     }
 
     const newUser = new User(
@@ -54,39 +58,62 @@ export class UserBusiness {
       password,
       USER_ROLES.NORMAL, // só é possível criar users com contas normais
       new Date().toISOString()
-    )
+    );
 
-    const newUserDB = newUser.toDBModel()
-    await this.userDatabase.insertUser(newUserDB)
+    const newUserDB = newUser.toDBModel();
+    await this.userDatabase.insertUser(newUserDB);
+
+    const payload: TokenPayload = {
+      id: newUser.getId(),
+      name: newUser.getName(),
+      role: newUser.getRole(),
+    };
+
+    const token = this.tokenManager.createToken(payload);
 
     const output: SignupOutputDTO = {
       message: "Cadastro realizado com sucesso",
-      token: "token"
-    }
+      token,
+    };
 
-    return output
-  }
+    return output;
+  };
 
-  public login = async (
-    input: LoginInputDTO
-  ): Promise<LoginOutputDTO> => {
-    const { email, password } = input
+  public login = async (input: LoginInputDTO): Promise<LoginOutputDTO> => {
+    const { email, password } = input;
 
-    const userDB = await this.userDatabase.findUserByEmail(email)
+    const userDB = await this.userDatabase.findUserByEmail(email);
 
     if (!userDB) {
-      throw new NotFoundError("'email' não encontrado")
+      throw new NotFoundError("'email' não encontrado");
     }
 
     if (password !== userDB.password) {
-      throw new BadRequestError("'email' ou 'password' incorretos")
+      throw new BadRequestError("'email' ou 'password' incorretos");
     }
 
-    const output: LoginOutputDTO = {
+    const user = new User(
+      userDB.id,
+      userDB.name,
+      userDB.email,
+      userDB.password,
+      userDB.role as USER_ROLES,
+      new Date().toISOString()
+    );
+
+    const payload: TokenPayload = {
+      id: user.getId(),
+      name: user.getName(),
+      role: user.getRole(),
+    };
+
+    const token = this.tokenManager.createToken(payload);
+
+    const response: LoginOutputDTO = {
       message: "Login realizado com sucesso",
-      token: "token"
-    }
+      token,
+    };
 
-    return output
-  }
+    return response;
+  };
 }
